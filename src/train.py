@@ -33,7 +33,17 @@ train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=Tr
 
 target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
 
-encoder = vit_small()
+encoder = vit_small(
+    patch_size=14,
+    img_size=518,
+    block_chunks=0,
+    init_values=1e-8,
+    num_register_tokens=4,
+    interpolate_antialias=False,
+    interpolate_offset=0.1,
+)
+ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu")
+encoder.load_state_dict(ckpt, strict=True)
 
 bottleneck = []
 decoder = []

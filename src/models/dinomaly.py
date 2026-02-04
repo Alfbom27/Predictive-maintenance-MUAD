@@ -25,7 +25,7 @@ class ViTillv2(nn.Module):
     def forward(self, x):
         x = self.encoder.prepare_tokens(x)
         en = []
-        for i, blk in enumerate(self.encoder.blocks[0]):
+        for i, blk in enumerate(self.encoder.blocks):
             if i <= self.target_layers[-1]:
                 with torch.no_grad():
                     x = blk(x)

@@ -155,7 +155,6 @@ for epoch in range(int(np.ceil(NUM_ITERATIONS / len(train_data)))):
                                        :int(anomaly_map.shape[1] * max_ratio)]
                             sp_score = sp_score.mean(dim=1)
                         pr_list_sp.append(sp_score)
-                        break
 
                     results = compute_ad_metrics(gt_list_px=gt_list_px, pr_list_px=pr_list_px, gt_list_sp=gt_list_sp, pr_list_sp=pr_list_sp)
                     auroc_sp, ap_sp, f1_sp, auroc_px, ap_px, f1_px, aupro_px = results

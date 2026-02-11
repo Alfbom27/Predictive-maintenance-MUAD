@@ -131,8 +131,6 @@ def compute_pro(masks: ndarray, amaps: ndarray, num_th: int = 200):
     # assert set(masks.flatten()) == {0, 1}, f"set(masks.flatten()) must be {0, 1} not: {set(masks.flatten())}"
     assert isinstance(num_th, int), "type(num_th) must be int"
 
-    print(f"Masks: {masks.sum()}")
-    print(f"amaps: {amaps.sum()}")
 
     df = pd.DataFrame([], columns=["pro", "fpr", "threshold"])
     binary_amaps = np.zeros_like(amaps, dtype=bool)

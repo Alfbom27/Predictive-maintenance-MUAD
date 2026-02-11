@@ -23,12 +23,12 @@ class_list = ["catenary_dropper", "electrical_insulator", "metal_welding", "nut_
 train_dataset = MIADDataset(dataset_path="miad", class_list=class_list, mode="train")
 
 NUM_ITERATIONS = 10000
-BATCH_SIZE = 2
+BATCH_SIZE = 16
 EMBED_DIM = 384
 NUM_HEADS = 6
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
 
 
 target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
@@ -91,6 +91,8 @@ max_ratio = 0.01  # top 1% of the pixels will be used for the anomaly score
 for epoch in range(int(np.ceil(NUM_ITERATIONS / len(train_data)))):
     model.train()
 
+    gaussian_kernel = get_gaussian_kernel(kernel_size=5, sigma=4).to(DEVICE)
+
     train_loss = []
     for batch in train_data:
         images, _, _ = batch
@@ -121,7 +123,7 @@ for epoch in range(int(np.ceil(NUM_ITERATIONS / len(train_data)))):
             for item in class_list:
 
                 test_dataset = MIADDataset(dataset_path="miad", class_list=[item], mode="test")
-                test_data = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
+                test_data = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True, num_workers=4, pin_memory=True)
 
                 gt_list_px = []
                 pr_list_px = []
@@ -139,8 +141,6 @@ for epoch in range(int(np.ceil(NUM_ITERATIONS / len(train_data)))):
                         if resize_mask is not None:
                             anomaly_map = F.interpolate(anomaly_map, size=resize_mask, mode='bilinear', align_corners=False)
                             gt = F.interpolate(gt, size=resize_mask, mode='nearest')
-
-                        gaussian_kernel = get_gaussian_kernel(kernel_size=5, sigma=4).to(DEVICE)
 
                         anomaly_map = gaussian_kernel(anomaly_map)
 

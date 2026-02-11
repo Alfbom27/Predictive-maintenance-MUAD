@@ -7,7 +7,7 @@ from models.vision_transformer import Block as VitBlock, bMlp, LinearAttention2
 from functools import partial
 from models.dinomaly import ViTillv2
 from utils.loss import global_cosine_hm_percent
-from utils.utils import get_gaussian_kernel, trunc_normal_, cal_anomaly_maps, compute_ad_metrics
+from utils.utils import get_gaussian_kernel, trunc_normal_, cal_anomaly_maps, compute_ad_metrics, WarmCosineScheduler
 from utils.optimizer import StableAdamW
 from timm.scheduler import CosineLRScheduler
 import numpy as np
@@ -45,6 +45,9 @@ encoder = vit_small(
 ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu")
 encoder.load_state_dict(ckpt, strict=True)
 
+for p in encoder.parameters():
+    p.requires_grad = False
+
 bottleneck = []
 decoder = []
 
@@ -76,7 +79,9 @@ for m in trainable_modules.modules():
 
 optimizer = StableAdamW([{'params': trainable_modules.parameters()}],
                         lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=True, eps=1e-10)
-lr_scheduler = CosineLRScheduler(optimizer, t_initial=NUM_ITERATIONS - 100, lr_min=2e-4, warmup_t=100, warmup_lr_init=0)
+# lr_scheduler = CosineLRScheduler(optimizer, t_initial=NUM_ITERATIONS - 100, lr_min=2e-4, warmup_t=100, warmup_lr_init=0)
+lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=2e-4, total_iters=NUM_ITERATIONS,
+                                   warmup_iters=100)
 
 print("Starting training...")
 it = 0
@@ -102,13 +107,13 @@ for epoch in range(int(np.ceil(NUM_ITERATIONS / len(train_data)))):
         nn.utils.clip_grad_norm_(trainable_modules.parameters(), max_norm=0.1)
         optimizer.step()
 
-        lr_scheduler.step_update(it)
+        lr_scheduler.step()
 
         train_loss.append(loss.item())
 
 
         # Evaluation...
-        if (it + 1) % 1000 == 0:
+        if (it + 1) % 10000 == 0:
             auroc_sp_list, ap_sp_list, f1_sp_list = [], [], []
             auroc_px_list, ap_px_list, f1_px_list, aupro_px_list = [], [], [], []
 
@@ -192,7 +197,7 @@ for epoch in range(int(np.ceil(NUM_ITERATIONS / len(train_data)))):
             model.train()
 
         it += 1
-        print("One iterations done...")
 
-    print(f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.4f}")
+    print(f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
+    torch.save(model.state_dict(), "model.pth")
 

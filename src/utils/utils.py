@@ -10,6 +10,7 @@ import pandas as pd
 from skimage import measure
 import numpy as np
 from statistics import mean
+from torch.optim.lr_scheduler import _LRScheduler
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
     # Cut & paste from PyTorch official master until it's in a few official releases - RW
@@ -130,8 +131,11 @@ def compute_pro(masks: ndarray, amaps: ndarray, num_th: int = 200):
     # assert set(masks.flatten()) == {0, 1}, f"set(masks.flatten()) must be {0, 1} not: {set(masks.flatten())}"
     assert isinstance(num_th, int), "type(num_th) must be int"
 
+    print(f"Masks: {masks.sum()}")
+    print(f"amaps: {amaps.sum()}")
+
     df = pd.DataFrame([], columns=["pro", "fpr", "threshold"])
-    binary_amaps = np.zeros_like(amaps, dtype=np.bool)
+    binary_amaps = np.zeros_like(amaps, dtype=bool)
 
     min_th = amaps.min()
     max_th = amaps.max()
@@ -182,3 +186,22 @@ def compute_ad_metrics(gt_list_px, pr_list_px, gt_list_sp, pr_list_sp):
     f1_px = f1_score_max(gt_list_px, pr_list_px)
 
     return [auroc_sp, ap_sp, f1_sp, auroc_px, ap_px, f1_px, aupro_px]
+
+class WarmCosineScheduler(_LRScheduler):
+
+    def __init__(self, optimizer, base_value, final_value, total_iters, warmup_iters=0, start_warmup_value=0, ):
+        self.final_value = final_value
+        self.total_iters = total_iters
+        warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
+
+        iters = np.arange(total_iters - warmup_iters)
+        schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * iters / len(iters)))
+        self.schedule = np.concatenate((warmup_schedule, schedule))
+
+        super(WarmCosineScheduler, self).__init__(optimizer)
+
+    def get_lr(self):
+        if self.last_epoch >= self.total_iters:
+            return [self.final_value for base_lr in self.base_lrs]
+        else:
+            return [self.schedule[self.last_epoch] for base_lr in self.base_lrs]

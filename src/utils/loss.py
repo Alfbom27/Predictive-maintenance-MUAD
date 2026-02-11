@@ -8,7 +8,7 @@ def modify_grad(x, inds, factor=0.):
     x[inds] *= factor
     return x
 
-def global_cosine_hm_percent(a, b, p=0.9, factor=0.):
+def global_cosine_hm_percent(a, b, p=0.9, factor=0.1):
     cos_loss = torch.nn.CosineSimilarity()
     loss = 0
     for item in range(len(a)):

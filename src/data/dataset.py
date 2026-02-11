@@ -79,10 +79,3 @@ class MIADDataset(Dataset):
         assert img.size()[1:] == gt.size()[1:], f"Shape mismatch: Img: {img.size()}, gt: {gt.size()}"
 
         return img, gt, self.labels[idx]
-
-
-
-
-
-
-

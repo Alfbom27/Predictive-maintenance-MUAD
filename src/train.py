@@ -15,13 +15,15 @@ from torch.nn import functional as F
 
 # CONFIG FILE WITH PARAMETERS
 
-class_list = ["catenary_dropper", "electrical_insulator", "metal_welding", "nut_and_bolt", "photovoltaic_module",
-              "wind_turbine", "witness_mark"]
+#class_list = ["catenary_dropper", "electrical_insulator", "metal_welding", "nut_and_bolt", "photovoltaic_module", "wind_turbine", "witness_mark"]
 
+class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "wind_turbine"]
 # class_list = ["wind_turbine"]
 
 train_dataset = MIADDataset(dataset_path="miad", class_list=class_list, mode="train")
 
+FROM_CHECKPOINT = False
+CHECKPOINT_PATH = ""
 NUM_ITERATIONS = 10000
 BATCH_SIZE = 16
 EMBED_DIM = 384
@@ -77,14 +79,25 @@ for m in trainable_modules.modules():
         nn.init.constant_(m.bias, 0)
         nn.init.constant_(m.weight, 1.0)
 
+
 optimizer = StableAdamW([{'params': trainable_modules.parameters()}],
                         lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=True, eps=1e-10)
 # lr_scheduler = CosineLRScheduler(optimizer, t_initial=NUM_ITERATIONS - 100, lr_min=2e-4, warmup_t=100, warmup_lr_init=0)
 lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=2e-4, total_iters=NUM_ITERATIONS,
                                    warmup_iters=100)
 
+if FROM_CHECKPOINT:
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location=DEVICE)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+    it = checkpoint["iteration"]
+
+else:
+    it = 0
+
 print("Starting training...")
-it = 0
 
 resize_mask = 256
 max_ratio = 0.01  # top 1% of the pixels will be used for the anomaly score
@@ -199,5 +212,9 @@ for epoch in range(int(np.ceil(NUM_ITERATIONS / len(train_data)))):
         it += 1
 
     print(f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
-    torch.save(model.state_dict(), "model.pth")
-
+    torch.save({
+        "iteration": it,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": lr_scheduler.state_dict(),
+    }, "checkpoint.pth")

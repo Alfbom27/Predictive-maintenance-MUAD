@@ -6,7 +6,7 @@ import torch
 
 
 class MIADDataset(Dataset):
-    def __init__(self, dataset_path=None, mode="train", class_list=None, transform=None, gt_transform=None, img_size=448, crop_size=392):
+    def __init__(self, dataset_path=None, mode="train", class_list=None, transform=None, gt_transform=None, img_size=448, crop_size=392, kd_training=False):
         self.dataset_path = dataset_path
         self.mode = mode
         self.transform = transform
@@ -14,6 +14,7 @@ class MIADDataset(Dataset):
         self.img_size = img_size
         self.crop_size = crop_size
         self.class_list = class_list
+        self.kd_training = kd_training
 
         if self.transform is None:
             self.transform = T.Compose([
@@ -68,6 +69,8 @@ class MIADDataset(Dataset):
 
     def __getitem__(self, idx):
         img = Image.open(self.image_paths[idx]).convert('RGB')
+        if self.kd_training:
+            return img
         img = self.transform(img)
 
         if self.labels[idx] == 0:
@@ -79,3 +82,48 @@ class MIADDataset(Dataset):
         assert img.size()[1:] == gt.size()[1:], f"Shape mismatch: Img: {img.size()}, gt: {gt.size()}"
 
         return img, gt, self.labels[idx]
+
+
+
+class KDTransforms:
+    def __init__(self):
+        self.global_transform = T.Compose([
+            T.RandomResizedCrop(224, scale=(0.4, 1.0)),
+            T.RandomHorizontalFlip(),
+            T.ColorJitter(0.4, 0.4, 0.2, 0.1),
+            T.RandomGrayscale(p=0.2),
+            T.GaussianBlur(23, sigma=(0.1, 2.0)),
+            T.ToTensor(),
+        ])
+
+        self.local_transform = T.Compose([
+            T.RandomResizedCrop(98, scale=(0.05, 0.4)),
+            T.RandomHorizontalFlip(),
+            T.ColorJitter(0.4, 0.4, 0.2, 0.1),
+            T.RandomGrayscale(p=0.2),
+            T.GaussianBlur(7, sigma=(0.1, 2.0)),
+            T.ToTensor(),
+        ])
+
+    def __call__(self, img):
+        global_crops = [self.global_transform(img) for _ in range(2)]
+        local_crops = [self.local_transform(img) for _ in range(8)]
+        return global_crops, local_crops
+
+
+class KDdataset(Dataset):
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self.transforms = KDTransforms()
+
+    def __getitem__(self, idx):
+        img = self.dataset[idx]
+        g, l = self.transforms(img)
+
+        views = g + l
+        return views
+
+    def __len__(self):
+        return len(self.dataset)
+
+

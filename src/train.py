@@ -101,7 +101,7 @@ print("Starting training...")
 
 resize_mask = 256
 max_ratio = 0.01  # top 1% of the pixels will be used for the anomaly score
-for epoch in range(int(np.ceil(NUM_ITERATIONS / len(train_data)))):
+while it < NUM_ITERATIONS:
     model.train()
 
     gaussian_kernel = get_gaussian_kernel(kernel_size=5, sigma=4).to(DEVICE)

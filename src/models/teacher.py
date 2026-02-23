@@ -10,4 +10,5 @@ class Teacher(nn.Module):
 
     def forward(self, x):
         x = self.backbone(x)
+        x = self.head(x)
         return x

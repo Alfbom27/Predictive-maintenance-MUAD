@@ -80,7 +80,7 @@ train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=Tr
 
 # Student
 student_backbone = vit_tiny(patch_size=16, drop_path_rate=0.1)
-student_head = StudentHead(in_dim=192, out_dim=768)
+student_head = DINOHead(in_dim=192, out_dim=65536)
 student = Student(backbone=student_backbone, head=student_head)
 student = student.to(DEVICE)
 
@@ -125,7 +125,6 @@ param_group = get_param_groups(student)
 lr = 2e-3 / (1024/BATCH_SIZE)
 # lr = 2e-3
 optimizer = AdamW(param_group, lr=lr, weight_decay=4e-2)
-print(optimizer.param_groups[0]["lr"])
 lr_scheduler = WarmCosineScheduler(optimizer, base_value=lr, final_value=1e-6, total_iters=EPOCHS * len(train_data),
                                    warmup_iters=WARMUP_EPOCHS * len(train_data))
 wd_scheduler = cosine_wd_scheduler(base_value=4e-2, final_value=0.4, epochs=EPOCHS, niter_per_epoch=len(train_data))
@@ -200,7 +199,6 @@ while it < (EPOCHS*len(train_data)):
             cos2 = F.cosine_similarity(s2, t2, dim=-1).mean()
             cos_embedding.append(((cos1 + cos2) * 0.5).item())
 
-        break
 
     print(f"iter [{it}/{EPOCHS*len(train_data)}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
     torch.save({

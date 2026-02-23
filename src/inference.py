@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from models.dinov2 import vit_small
+from models.dinov2 import vit_small, vit_tiny
 from models.vision_transformer import Block as VitBlock, bMlp, LinearAttention2
 from functools import partial
 from models.dinomaly import ViTillv2
@@ -55,6 +55,8 @@ def visualize(images, gts, anomaly_maps, max_cols=10):
 
 EMBED_DIM = 384
 NUM_HEADS = 6
+# EMBED_DIM = 192
+# NUM_HEADS = 3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -69,8 +71,23 @@ encoder = vit_small(
     interpolate_antialias=False,
     interpolate_offset=0.1,
 )
+"""
+
+encoder = vit_tiny(
+    patch_size=14,
+    img_size=518,
+    block_chunks=0,
+    init_values=1e-8,
+    num_register_tokens=0,
+    interpolate_antialias=False,
+    interpolate_offset=0.1,
+)
+"""
+
 ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu")
 encoder.load_state_dict(ckpt, strict=True)
+# ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_vit_tiny_encoder_3k.pth", map_location="cpu")
+# encoder.load_state_dict(ckpt["model_state_dict"], strict=True)
 
 for p in encoder.parameters():
     p.requires_grad = False
@@ -92,7 +109,7 @@ decoder = nn.ModuleList(decoder)
 
 model = ViTillv2(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
 
-checkpoint = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_miad_35k.pth", map_location=DEVICE, weights_only=False)
+checkpoint = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_miad_15k.pth", map_location=DEVICE, weights_only=False)
 
 model.load_state_dict(checkpoint["model_state_dict"])
 
@@ -109,7 +126,7 @@ SAMPLE_SIZE = 5
 
 test_dataset = MIADDataset(dataset_path="miad", class_list=class_list, mode="test")
 
-test_data = DataLoader(dataset=test_dataset, batch_size=SAMPLE_SIZE, shuffle=False, drop_last=True)
+test_data = DataLoader(dataset=test_dataset, batch_size=SAMPLE_SIZE, shuffle=True, drop_last=True)
 
 resize_mask = 256
 gaussian_kernel = get_gaussian_kernel(kernel_size=5, sigma=4).to(DEVICE)

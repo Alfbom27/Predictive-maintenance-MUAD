@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from models.dinov2 import vit_tiny, vit_base
+from models.dinov1 import vit_base, vit_tiny, DINOHead
 from data.dataset import KDdataset, MIADDataset
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -10,6 +10,7 @@ from utils.utils import WarmCosineScheduler
 import numpy as np
 import random
 import torch.nn.functional as F
+from utils.loss import RoBLoss
 
 # Data
 
@@ -31,14 +32,43 @@ def seed_worker(worker_id):
 def cosine_loss(s,t):
     return 2 - 2 * (s * t).sum(dim=-1).mean()
 
+def get_param_groups(model):
+    decay = []
+    no_decay = []
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+
+        if name.endswith(".bias") or "norm" in name:
+            no_decay.append(param)
+        else:
+            decay.append(param)
+
+    return [
+        {"params": decay},
+        {"params": no_decay, "weight_decay": 0.0},
+    ]
+
+def cosine_wd_scheduler(base_value, final_value, epochs, niter_per_epoch):
+    total_iters = epochs * niter_per_epoch
+    iters = np.arange(total_iters)
+
+    schedule = final_value + 0.5 * (base_value - final_value) * (
+        1 + np.cos(np.pi * iters / total_iters)
+    )
+
+    return schedule
 
 class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "wind_turbine"]
 
 miad_data = MIADDataset(dataset_path="miad", class_list=class_list, mode="train", kd_training=True)
 train_dataset = KDdataset(miad_data)
 
-EPOCHS = 100
-WARMUP_EPOCHS = 10
+FROM_CHECKPOINT = False
+CHECKPOINT_PATH = ""
+EPOCHS = 30
+WARMUP_EPOCHS = 1
 BATCH_SIZE = 1
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -49,29 +79,40 @@ train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=Tr
 
 
 # Student
-
-K = 1000
-
-student_backbone = vit_tiny()
+student_backbone = vit_tiny(patch_size=16, drop_path_rate=0.1)
 student_head = StudentHead(in_dim=192, out_dim=768)
 student = Student(backbone=student_backbone, head=student_head)
+student = student.to(DEVICE)
 
-# Teacher
-teacher_backbone = vit_base(
-    patch_size=14,
-    img_size=518,
-    block_chunks=0,
-    init_values=1e-8,
-    num_register_tokens=0,
-    interpolate_antialias=False,
-    interpolate_offset=0.1,
-)
+
 ckpt = torch.load(
-    "../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vitb14_pretrain.pth",
+    "../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dino_vitbase16_pretrain_full_checkpoint.pth",
     map_location="cpu")
-teacher_backbone.load_state_dict(ckpt, strict=True)
 
-teacher = Teacher(backbone=teacher_backbone)
+backbone_dict = {
+    k[len("backbone."):]: v
+    for k, v in ckpt["teacher"].items()
+    if k.startswith("backbone.")
+}
+
+head_dict = {
+    k[len("head."):]: v
+    for k, v in ckpt["teacher"].items()
+    if k.startswith("head.")
+}
+
+
+teacher_backbone = vit_base(patch_size=16)
+teacher_backbone.load_state_dict(backbone_dict)
+
+teacher_head = DINOHead(
+    in_dim=768,
+    out_dim=65536,
+)
+teacher_head.load_state_dict(head_dict)
+
+teacher = Teacher(backbone=teacher_backbone, head=teacher_head)
+teacher = teacher.to(DEVICE)
 
 for p in teacher.parameters():
     p.requires_grad = False
@@ -79,14 +120,31 @@ teacher.eval()
 
 # Optim and Lr scheduler
 
-# TODO: add weight decay cosine scheduler
-optimizer = AdamW(student.parameters(), lr=2e-3, weight_decay=4e-2)
+param_group = get_param_groups(student)
 
-lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=1e-6, total_iters=EPOCHS * len(train_data),
+lr = 2e-3 / (1024/BATCH_SIZE)
+# lr = 2e-3
+optimizer = AdamW(param_group, lr=lr, weight_decay=4e-2)
+print(optimizer.param_groups[0]["lr"])
+lr_scheduler = WarmCosineScheduler(optimizer, base_value=lr, final_value=1e-6, total_iters=EPOCHS * len(train_data),
                                    warmup_iters=WARMUP_EPOCHS * len(train_data))
+wd_scheduler = cosine_wd_scheduler(base_value=4e-2, final_value=0.4, epochs=EPOCHS, niter_per_epoch=len(train_data))
+loss_fn = RoBLoss()
 
-it = 0
-for epoch in range(EPOCHS):
+if FROM_CHECKPOINT:
+    print("Continuing from checkpoint...")
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location=DEVICE)
+    student.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+    it = checkpoint["iteration"]
+
+else:
+    it = 0
+
+while it < (EPOCHS*len(train_data)):
+    print("Starting training...")
     train_loss = []
     cos_embedding = []
 
@@ -98,42 +156,43 @@ for epoch in range(EPOCHS):
 
         # teacher pred
         with torch.no_grad():
-            teacher_global = teacher(torch.cat(global_crops, dim=0))
+            teacher_global = teacher(torch.cat(global_crops, dim=0).to(DEVICE))
             teacher_global = F.normalize(teacher_global, dim=-1)
 
 
         t1, t2 = teacher_global[:B], teacher_global[B:]
 
-        student_global = student(torch.cat(global_crops, dim=0))
+        student_global = student(torch.cat(global_crops, dim=0).to(DEVICE))
         student_global = F.normalize(student_global, dim=-1)
 
-        student_local = student(torch.cat(local_crops, dim=0))
+        student_local = student(torch.cat(local_crops, dim=0).to(DEVICE))
         student_local = F.normalize(student_local, dim=-1)
 
         s1, s2 = student_global[:B], student_global[B:]
         s_locals = student_local.chunk(len(local_crops)) # List of local crops over batch
 
-        print(t1.shape, t2.shape)
-        print(s1.shape, s2.shape)
-        print(len(s_locals))
 
         # Loss
-        num_views = 2 + len(s_locals)
+        num_views = 2 + 2 * len(s_locals)
         loss = 0
 
-        loss += cosine_loss(s1, t1)
-        loss += cosine_loss(s2, t2)
+        loss += loss_fn(s1, t1)
+        loss += loss_fn(s2, t2)
 
         for s_v in s_locals:
-            loss += 0.5 * (cosine_loss(s_v, t1) + cosine_loss(s_v, t2))
+            loss += loss_fn(s_v, t1) + loss_fn(s_v, t2)
 
         loss /= num_views
 
 
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
+        # torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
         optimizer.step()
+
+        it += 1
+        lr_scheduler.step()
+        optimizer.param_groups[0]["weight_decay"] = wd_scheduler[it]
 
         train_loss.append(loss.item())
         with torch.no_grad():
@@ -141,7 +200,12 @@ for epoch in range(EPOCHS):
             cos2 = F.cosine_similarity(s2, t2, dim=-1).mean()
             cos_embedding.append(((cos1 + cos2) * 0.5).item())
 
-        it += 1
-    print(f"iter [{it}/{EPOCHS*len(train_data)}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
+        break
 
-    break
+    print(f"iter [{it}/{EPOCHS*len(train_data)}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
+    torch.save({
+        "iteration": it,
+        "model_state_dict": student.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": lr_scheduler.state_dict(),
+    }, "checkpoint.pth")

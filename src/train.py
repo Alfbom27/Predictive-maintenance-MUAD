@@ -1,17 +1,17 @@
 import torch
 import torch.nn as nn
 from data.dataset import MIADDataset
-from torch.utils.data import DataLoader
-from models.dinov2 import vit_small
+from torch.utils.data import DataLoader, Subset
+from models.dinov2 import vit_small, vit_tiny
 from models.vision_transformer import Block as VitBlock, bMlp, LinearAttention2
 from functools import partial
 from models.dinomaly import ViTillv2
 from utils.loss import global_cosine_hm_percent
 from utils.utils import get_gaussian_kernel, trunc_normal_, cal_anomaly_maps, compute_ad_metrics, WarmCosineScheduler
 from utils.optimizer import StableAdamW
-from timm.scheduler import CosineLRScheduler
 import numpy as np
 from torch.nn import functional as F
+import random
 
 # CONFIG FILE WITH PARAMETERS
 
@@ -22,19 +22,34 @@ class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "w
 
 train_dataset = MIADDataset(dataset_path="miad", class_list=class_list, mode="train")
 
-FROM_CHECKPOINT = False
-CHECKPOINT_PATH = ""
-NUM_ITERATIONS = 10000
-BATCH_SIZE = 16
-EMBED_DIM = 384
-NUM_HEADS = 6
+FROM_CHECKPOINT = True
+CHECKPOINT_PATH = "../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_miad_vit_tiny.pth"
+NUM_ITERATIONS = 100000
+BATCH_SIZE = 2
+# EMBED_DIM = 384
+# NUM_HEADS = 6
+EMBED_DIM = 192
+NUM_HEADS = 3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
+# train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
+train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
 
 
 target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
 
+
+encoder = vit_tiny(
+    patch_size=14,
+    img_size=518,
+    block_chunks=0,
+    init_values=1e-8,
+    num_register_tokens=0,
+    interpolate_antialias=False,
+    interpolate_offset=0.1,
+)
+
+"""
 encoder = vit_small(
     patch_size=14,
     img_size=518,
@@ -44,8 +59,12 @@ encoder = vit_small(
     interpolate_antialias=False,
     interpolate_offset=0.1,
 )
-ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu")
-encoder.load_state_dict(ckpt, strict=True)
+"""
+
+# ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu", weights_only=False)
+# encoder.load_state_dict(ckpt, strict=True)
+ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_vit_tiny_encoder_3k.pth", map_location="cpu")
+encoder.load_state_dict(ckpt["model_state_dict"], strict=True)
 
 for p in encoder.parameters():
     p.requires_grad = False
@@ -87,7 +106,7 @@ lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=2e-4,
                                    warmup_iters=100)
 
 if FROM_CHECKPOINT:
-    checkpoint = torch.load(CHECKPOINT_PATH, map_location=DEVICE)
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location=DEVICE, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
@@ -128,7 +147,8 @@ while it < NUM_ITERATIONS:
 
 
         # Evaluation...
-        if (it + 1) % 10000 == 0:
+        if (it + 1) % 1 == 0:
+            print("Evaluation...")
             auroc_sp_list, ap_sp_list, f1_sp_list = [], [], []
             auroc_px_list, ap_px_list, f1_px_list, aupro_px_list = [], [], [], []
 
@@ -136,7 +156,14 @@ while it < NUM_ITERATIONS:
             for item in class_list:
 
                 test_dataset = MIADDataset(dataset_path="miad", class_list=[item], mode="test")
-                test_data = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True, num_workers=4, pin_memory=True)
+                # test_data = DataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True, num_workers=4, pin_memory=True)
+
+                subset_size = 100
+                indices = random.sample(range(len(test_dataset)), subset_size)
+
+                test_subset = Subset(test_dataset, indices)
+                test_data = DataLoader(dataset=test_subset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
+
 
                 gt_list_px = []
                 pr_list_px = []

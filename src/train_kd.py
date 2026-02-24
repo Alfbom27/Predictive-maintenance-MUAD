@@ -156,16 +156,13 @@ while it < (EPOCHS*len(train_data)):
         # teacher pred
         with torch.no_grad():
             teacher_global = teacher(torch.cat(global_crops, dim=0).to(DEVICE))
-            teacher_global = F.normalize(teacher_global, dim=-1)
 
 
         t1, t2 = teacher_global[:B], teacher_global[B:]
 
         student_global = student(torch.cat(global_crops, dim=0).to(DEVICE))
-        student_global = F.normalize(student_global, dim=-1)
 
         student_local = student(torch.cat(local_crops, dim=0).to(DEVICE))
-        student_local = F.normalize(student_local, dim=-1)
 
         s1, s2 = student_global[:B], student_global[B:]
         s_locals = student_local.chunk(len(local_crops)) # List of local crops over batch

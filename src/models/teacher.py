@@ -31,5 +31,5 @@ class TeacherFKD(nn.Module):
             if i == self.target_layers[-1]:
                 break
 
-        en = [e[:, self.backbone.num_register_tokens + 1:, :] for e in en]
+        # en = [e[:, self.backbone.num_register_tokens + 1:, :] for e in en]
         return en

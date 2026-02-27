@@ -1,0 +1,12 @@
+from_checkpoint: False
+checkpoint_path: "checkpoint.pth"
+
+
+epochs: 30
+warmup_epochs: 2
+learning_rate: 0.002
+batch_size: 1
+
+dataset_path: "miad"
+
+teacher_checkpoint_path: "../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vitb14_pretrain.pth"

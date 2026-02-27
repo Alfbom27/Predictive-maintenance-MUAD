@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from models.dinov2 import vit_base, vit_tiny
 from data.dataset import KDdataset, MIADDataset
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from torch.optim import AdamW
 from models.student import StudentFKD
 from models.teacher import TeacherFKD
@@ -42,11 +42,23 @@ class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "w
 
 train_dataset = MIADDataset(dataset_path=DATASET_PATH, class_list=class_list, mode="train")
 
+dataset_size = len(train_dataset)
+val_size = int(0.1 * dataset_size)
+train_size = dataset_size - val_size
+
+train_subset, val_subset = random_split(
+    train_dataset,
+    [train_size, val_size],
+)
 
 # train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4,
 #                        pin_memory=True)
 
 train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+
+val_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+#val_data = DataLoader(dataset=val_subset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4,
+#                       pin_memory=True)
 
 teacher_backbone = vit_base(
     patch_size=14,
@@ -167,6 +179,31 @@ while it < (EPOCHS*len(train_data)):
                 "scheduler_state_dict": lr_scheduler.state_dict(),
             }, "checkpoint.pth")
 
+    student.eval()
+    val_cos = []
+    val_loss = []
+    with torch.no_grad():
+        for batch in val_data:
+            images, _, _ = batch
+            images = images.to(DEVICE)
+
+            teacher_out = teacher(images)
+
+            student_out = student(images)
+
+            cos = 0
+            loss = 0
+            for sf, tf in zip(student_out, teacher_out):
+                sf = F.normalize(sf, dim=-1)
+                tf = F.normalize(tf, dim=-1)
+                cos += F.cosine_similarity(sf, tf, dim=-1).mean()
+                loss += F.mse_loss(sf, tf)
+
+            loss /= len(student_out)
+            cos /= len(student_out)
+            val_cos.append(cos.item())
+            val_loss.append(loss.item())
+        print(f"Evaluation: Val loss: {np.mean(val_loss)}, Val cos embedding: {np.mean(val_cos)}")
 
     print(f"iter [{it}/{EPOCHS*len(train_data)}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
     torch.save({

@@ -5,13 +5,14 @@ from torch.utils.data import DataLoader, Subset
 from models.dinov2 import vit_small, vit_tiny
 from models.vision_transformer import Block as VitBlock, bMlp, LinearAttention2
 from functools import partial
-from models.dinomaly import ViTillv2
+from models.dinomaly import ViTillv2, ViTillSmall
 from utils.loss import global_cosine_hm_percent
 from utils.utils import get_gaussian_kernel, trunc_normal_, cal_anomaly_maps, compute_ad_metrics, WarmCosineScheduler
 from utils.optimizer import StableAdamW
 import numpy as np
 from torch.nn import functional as F
 import random
+from models.student import StudentFKD
 
 # CONFIG FILE WITH PARAMETERS
 
@@ -22,13 +23,14 @@ class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "w
 
 train_dataset = MIADDataset(dataset_path="miad", class_list=class_list, mode="train")
 
-FROM_CHECKPOINT = True
-CHECKPOINT_PATH = "../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_miad_vit_tiny.pth"
+FROM_CHECKPOINT = False
+CHECKPOINT_PATH = ""
 NUM_ITERATIONS = 100000
 BATCH_SIZE = 2
 # EMBED_DIM = 384
 # NUM_HEADS = 6
-EMBED_DIM = 192
+# EMBED_DIM = 192
+EMBED_DIM = 768 # Same embed dim as the linear proj layer
 NUM_HEADS = 3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -39,7 +41,7 @@ train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=Tr
 target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
 
 
-encoder = vit_tiny(
+vit_t = vit_tiny(
     patch_size=14,
     img_size=518,
     block_chunks=0,
@@ -48,6 +50,8 @@ encoder = vit_tiny(
     interpolate_antialias=False,
     interpolate_offset=0.1,
 )
+
+encoder = StudentFKD(backbone=vit_t, teacher_dims=768, student_dims=192)
 
 """
 encoder = vit_small(
@@ -63,7 +67,9 @@ encoder = vit_small(
 
 # ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu", weights_only=False)
 # encoder.load_state_dict(ckpt, strict=True)
-ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_vit_tiny_encoder_3k.pth", map_location="cpu")
+ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_fkd/checkpoint_vit_tiny_cls_20k.pth", map_location="cpu", weights_only=False)
+
+
 encoder.load_state_dict(ckpt["model_state_dict"], strict=True)
 
 for p in encoder.parameters():
@@ -84,7 +90,8 @@ for i in range(8):
 
 decoder = nn.ModuleList(decoder)
 
-model = ViTillv2(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
+# model = ViTillv2(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
+model = ViTillSmall(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
 model = model.to(DEVICE)
 
 trainable_modules = nn.ModuleList([bottleneck, decoder])

@@ -55,3 +55,39 @@ class ViTillv2(nn.Module):
 
     def fuse_feature(self, feat_list):
         return torch.stack(feat_list, dim=1).mean(dim=1)
+
+class ViTillSmall(ViTillv2):
+    def __init__(
+            self,
+            encoder,
+            bottleneck,
+            decoder,
+            target_layers=[2, 3, 4, 5, 6, 7]
+    ) -> None:
+        super().__init__(encoder, bottleneck, decoder, target_layers)
+        self.encoder = encoder
+        self.bottleneck = bottleneck
+        self.decoder = decoder
+        self.target_layers = target_layers
+
+    def forward(self, x):
+        en = self.encoder(x)
+        x = self.fuse_feature(en)
+        for i, blk in enumerate(self.bottleneck):
+            x = blk(x)
+
+        de = []
+        for i, blk in enumerate(self.decoder):
+            x = blk(x)
+            de.append(x)
+
+        side = int(math.sqrt(x.shape[1]))
+
+        en = [e[:, 1:, :] for e in en]
+        de = [d[:, 1:, :] for d in de]
+
+        en = [e.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for e in en]
+        de = [d.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for d in de]
+
+        return en[::-1], de
+

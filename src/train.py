@@ -26,7 +26,7 @@ train_dataset = MIADDataset(dataset_path="miad", class_list=class_list, mode="tr
 FROM_CHECKPOINT = False
 CHECKPOINT_PATH = ""
 NUM_ITERATIONS = 100000
-BATCH_SIZE = 2
+BATCH_SIZE = 16
 EMBED_DIM = 384
 NUM_HEADS = 6
 # EMBED_DIM = 192
@@ -153,9 +153,12 @@ while it < NUM_ITERATIONS:
 
         train_loss.append(loss.item())
 
+        if it % 250 == 0:
+            print(
+                f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.6f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
 
         # Evaluation...
-        if (it + 1) % 1 == 0:
+        if (it + 1) % 20000 == 0:
             print("Evaluation...")
             auroc_sp_list, ap_sp_list, f1_sp_list = [], [], []
             auroc_px_list, ap_px_list, f1_px_list, aupro_px_list = [], [], [], []

@@ -1,12 +1,15 @@
 import torch
 import torch.nn as nn
+
 from models.dinov2 import vit_small, vit_tiny
 from models.vision_transformer import Block as VitBlock, bMlp, LinearAttention2
 from functools import partial
-from models.dinomaly import ViTillv2
+from models.dinomaly import ViTillv2, ViTillSmall, ViTillv2Small
 from data.dataset import MIADDataset
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
+
+from models.student import StudentFKD
 from utils.utils import cal_anomaly_maps, get_gaussian_kernel
 from matplotlib import pyplot as plt
 import numpy as np
@@ -53,15 +56,18 @@ def visualize(images, gts, anomaly_maps, max_cols=10):
 
 
 
-EMBED_DIM = 384
-NUM_HEADS = 6
+# EMBED_DIM = 384
+# NUM_HEADS = 6
 # EMBED_DIM = 192
 # NUM_HEADS = 3
+EMBED_DIM = 384
+NUM_HEADS = 6
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
 
+"""
 encoder = vit_small(
     patch_size=14,
     img_size=518,
@@ -73,7 +79,7 @@ encoder = vit_small(
 )
 """
 
-encoder = vit_tiny(
+vit_t = vit_tiny(
     patch_size=14,
     img_size=518,
     block_chunks=0,
@@ -82,10 +88,11 @@ encoder = vit_tiny(
     interpolate_antialias=False,
     interpolate_offset=0.1,
 )
-"""
 
-ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu")
-encoder.load_state_dict(ckpt, strict=True)
+encoder = StudentFKD(backbone=vit_t, teacher_dims=384, student_dims=192)
+
+# ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu")
+# encoder.load_state_dict(ckpt, strict=True)
 # ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_vit_tiny_encoder_3k.pth", map_location="cpu")
 # encoder.load_state_dict(ckpt["model_state_dict"], strict=True)
 
@@ -107,9 +114,9 @@ for i in range(8):
 
 decoder = nn.ModuleList(decoder)
 
-model = ViTillv2(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
+model = ViTillSmall(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
 
-checkpoint = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/checkpoint_miad_15k.pth", map_location=DEVICE, weights_only=False)
+checkpoint = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinomaly_ckpt/vitill_tiny_kd/checkpoint_miad_vit_tiny_70k.pth", map_location=DEVICE, weights_only=False)
 
 model.load_state_dict(checkpoint["model_state_dict"])
 
@@ -118,9 +125,9 @@ model.eval()
 
 # Data
 
-class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "wind_turbine"]
+# class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "wind_turbine"]
 
-# class_list = ["wind_turbine"]
+class_list = ["wind_turbine"]
 
 SAMPLE_SIZE = 5
 
@@ -133,6 +140,7 @@ gaussian_kernel = get_gaussian_kernel(kernel_size=5, sigma=4).to(DEVICE)
 with torch.no_grad():
     for batch in test_data:
         images, gt, labels = batch
+
         images = images.to(DEVICE)
         encoded, decoded = model(images)
 

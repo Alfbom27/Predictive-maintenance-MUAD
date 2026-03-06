@@ -128,6 +128,8 @@ print("Starting training...")
 
 resize_mask = 256
 max_ratio = 0.01  # top 1% of the pixels will be used for the anomaly score
+
+scaler = torch.cuda.amp.GradScaler()
 while it < NUM_ITERATIONS:
     model.train()
 
@@ -138,6 +140,27 @@ while it < NUM_ITERATIONS:
         images, _, _ = batch
         images = images.to(DEVICE)
 
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            encoded, decoded = model(images)
+
+            p_final = 0.9
+            p = min(p_final * it / 1000, p_final)
+
+            loss = global_cosine_hm_percent(encoded, decoded, p=p)
+
+        scaler.scale(loss).backward()
+
+        scaler.unscale_(optimizer)
+        nn.utils.clip_grad_norm_(trainable_modules.parameters(), max_norm=0.1)
+
+        scaler.step(optimizer)
+        scaler.update()
+
+        lr_scheduler.step()
+
+        train_loss.append(loss.item())
+
+        """
         encoded, decoded = model(images)
 
         p_final = 0.9
@@ -151,14 +174,14 @@ while it < NUM_ITERATIONS:
 
         lr_scheduler.step()
 
-        train_loss.append(loss.item())
+        train_loss.append(loss.item())"""
 
         if it % 250 == 0:
             print(
                 f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.6f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
 
         # Evaluation...
-        if (it + 1) % 20000 == 0:
+        if (it + 1) % 50000 == 0:
             print("Evaluation...")
             auroc_sp_list, ap_sp_list, f1_sp_list = [], [], []
             auroc_px_list, ap_px_list, f1_px_list, aupro_px_list = [], [], [], []

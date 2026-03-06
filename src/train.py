@@ -128,8 +128,6 @@ print("Starting training...")
 
 resize_mask = 256
 max_ratio = 0.01  # top 1% of the pixels will be used for the anomaly score
-
-scaler = torch.cuda.amp.GradScaler()
 while it < NUM_ITERATIONS:
     model.train()
 
@@ -140,27 +138,6 @@ while it < NUM_ITERATIONS:
         images, _, _ = batch
         images = images.to(DEVICE)
 
-        with torch.autocast(device_type="cuda", dtype=torch.float16):
-            encoded, decoded = model(images)
-
-            p_final = 0.9
-            p = min(p_final * it / 1000, p_final)
-
-            loss = global_cosine_hm_percent(encoded, decoded, p=p)
-
-        scaler.scale(loss).backward()
-
-        scaler.unscale_(optimizer)
-        nn.utils.clip_grad_norm_(trainable_modules.parameters(), max_norm=0.1)
-
-        scaler.step(optimizer)
-        scaler.update()
-
-        lr_scheduler.step()
-
-        train_loss.append(loss.item())
-
-        """
         encoded, decoded = model(images)
 
         p_final = 0.9
@@ -174,7 +151,7 @@ while it < NUM_ITERATIONS:
 
         lr_scheduler.step()
 
-        train_loss.append(loss.item())"""
+        train_loss.append(loss.item())
 
         if it % 250 == 0:
             print(

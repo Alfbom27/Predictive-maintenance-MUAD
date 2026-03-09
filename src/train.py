@@ -34,13 +34,13 @@ NUM_HEADS = 6
 # NUM_HEADS = 3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
-train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
+# train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
 
 
 target_layers = [2, 3, 4, 5, 6, 7, 8, 9]
 
-"""
+
 vit_t = vit_tiny(
     patch_size=14,
     img_size=518,
@@ -51,7 +51,7 @@ vit_t = vit_tiny(
     interpolate_offset=0.1,
 )
 
-encoder = StudentFKD(backbone=vit_t, teacher_dims=768, student_dims=192)
+encoder = StudentFKD(backbone=vit_t, teacher_dims=384, student_dims=192)
 
 """
 encoder = vit_small(
@@ -63,14 +63,14 @@ encoder = vit_small(
     interpolate_antialias=False,
     interpolate_offset=0.1,
 )
-
+"""
 
 ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_vits14_reg4_pretrain.pth", map_location="cpu", weights_only=False)
-encoder.load_state_dict(ckpt, strict=True)
+# encoder.load_state_dict(ckpt, strict=True)
 # ckpt = torch.load("../PycharmProjects/Pythonprojects/Predictive-maintenance-MUAD/src/weights/dinov2_fkd/checkpoint_vit_tiny_cls_20k.pth", map_location="cpu", weights_only=False)
 
 
-encoder.load_state_dict(ckpt, strict=True)
+encoder.load_state_dict(ckpt["model_state_dict"], strict=True)
 
 for p in encoder.parameters():
     p.requires_grad = False
@@ -91,9 +91,11 @@ for i in range(8):
 decoder = nn.ModuleList(decoder)
 
 # model = ViTillv2(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
-model = ViTill(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
-# model = ViTillSmall(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
+# model = ViTill(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
+model = ViTillSmall(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
+torch.set_float32_matmul_precision('high')
 model = model.to(DEVICE)
+model = torch.compile(model)
 
 trainable_modules = nn.ModuleList([bottleneck, decoder])
 
@@ -153,12 +155,12 @@ while it < NUM_ITERATIONS:
 
         train_loss.append(loss.item())
 
-        if it % 250 == 0:
+        if (it + 1) % 250 == 0:
             print(
-                f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.6f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
+                f"iter [{it+1}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.6f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
 
         # Evaluation...
-        if (it + 1) % 50000 == 0:
+        if (it + 1) % 10000 == 0:
             print("Evaluation...")
             auroc_sp_list, ap_sp_list, f1_sp_list = [], [], []
             auroc_px_list, ap_px_list, f1_px_list, aupro_px_list = [], [], [], []

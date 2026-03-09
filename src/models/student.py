@@ -18,6 +18,7 @@ class Student(nn.Module):
     def __init__(self, backbone, target_layers=[2, 3, 4, 5, 6, 7, 8, 9]):
         super().__init__()
         self.backbone = backbone
+        self.target_layers = target_layers
 
     def forward(self, x):
         x = self.backbone.prepare_tokens(x)

@@ -15,15 +15,22 @@ class StudentHead(nn.Module):
 
 
 class Student(nn.Module):
-    def __init__(self, backbone, head):
+    def __init__(self, backbone):
         super().__init__()
         self.backbone = backbone
-        self.head = head
 
     def forward(self, x):
-        x = self.backbone(x)
-        x = self.head(x)
-        return x
+        x = self.backbone.prepare_tokens(x)
+        en = []
+        for i, blk in enumerate(self.backbone.blocks):
+            x = blk(x)
+
+            if i in self.target_layers:
+                en.append(x)
+
+            if i == self.target_layers[-1]:
+                break
+        return en
 
 
 class StudentFKD(nn.Module):

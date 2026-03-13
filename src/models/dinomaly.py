@@ -133,11 +133,17 @@ class ViTillSmall(ViTill):
         self.target_layers = target_layers
         self.fuse_layer_encoder = fuse_layer_encoder
         self.fuse_layer_decoder = fuse_layer_decoder
+        self.decoder_adapters = nn.ModuleList([
+            nn.Conv2d(encoder.student_dims, encoder.teacher_dims, kernel_size=1, bias=False)
+            for _ in range(len(fuse_layer_encoder))
+        ])
 
     def forward(self, x):
-        en_list = self.encoder(x)
-        x = self.fuse_feature(en_list)
-        side = int(math.sqrt(en_list[0].shape[1] - 1 - self.encoder.num_register_tokens))
+        with torch.no_grad():
+            en, en_raw_list = self.encoder(x)
+
+        x = self.fuse_feature(en_raw_list)
+        side = int(math.sqrt(en_raw_list[0].shape[1] - 1 - self.encoder.backbone.num_register_tokens))
 
         for i, blk in enumerate(self.bottleneck):
             x = blk(x)
@@ -148,14 +154,16 @@ class ViTillSmall(ViTill):
             de_list.append(x)
         de_list = de_list[::-1]
 
-        en = [self.fuse_feature([en_list[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
+        # en = [self.fuse_feature([en_list[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
         de = [self.fuse_feature([de_list[idx] for idx in idxs]) for idxs in self.fuse_layer_decoder]
 
-        en = [e[:, 1 + self.encoder.num_register_tokens:, :] for e in en]
+        # en = [e[:, 1 + self.encoder.num_register_tokens:, :] for e in en]
         de = [d[:, 1 + self.encoder.num_register_tokens:, :] for d in de]
 
-        en = [e.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for e in en]
+        # en = [e.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for e in en]
         de = [d.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for d in de]
+
+        de = [l(d) for d, l in zip(de, self.decoder_adapters)]
         return en, de
 
 

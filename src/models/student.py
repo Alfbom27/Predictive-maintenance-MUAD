@@ -60,7 +60,7 @@ class StudentFKD(nn.Module):
 
             if i == self.target_layers[-1]:
                 break
-
+        en_raw = en
         side = int(math.sqrt(en[0].shape[1] - 1 - self.backbone.num_register_tokens))
 
         en = [self.fuse_feature([en[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
@@ -71,7 +71,7 @@ class StudentFKD(nn.Module):
         for e, l in zip(en, self.adapters):
             projected.append(l(e))
 
-        return projected, en
+        return projected, en_raw
 
     def fuse_feature(self, feat_list):
         return torch.stack(feat_list, dim=1).mean(dim=1)

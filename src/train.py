@@ -27,14 +27,14 @@ FROM_CHECKPOINT = False
 CHECKPOINT_PATH = ""
 NUM_ITERATIONS = 100000
 BATCH_SIZE = 16
-EMBED_DIM = 384
-NUM_HEADS = 6
+EMBED_DIM = 192
+NUM_HEADS = 3
 # EMBED_DIM = 192
 # EMBED_DIM = 768 # Same embed dim as the linear proj layer
 # NUM_HEADS = 3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
+train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=8, pin_memory=True)
 # train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
 
 
@@ -97,7 +97,8 @@ torch.set_float32_matmul_precision('high')
 model = model.to(DEVICE)
 model = torch.compile(model)
 
-trainable_modules = nn.ModuleList([bottleneck, decoder])
+# trainable_modules = nn.ModuleList([bottleneck, decoder])
+trainable_modules = nn.ModuleList([bottleneck, decoder, model.decoder_adapters])
 
 for m in trainable_modules.modules():
     if isinstance(m, nn.Linear):

@@ -1,5 +1,7 @@
 import torch.nn as nn
 import torch
+import math
+
 
 class StudentHead(nn.Module):
     def __init__(self, in_dim=192, out_dim=768):
@@ -35,14 +37,16 @@ class Student(nn.Module):
 
 
 class StudentFKD(nn.Module):
-    def __init__(self, backbone, teacher_dims, student_dims, target_layers=[2, 3, 4, 5, 6, 7, 8, 9]):
+    def __init__(self, backbone, teacher_dims, student_dims, target_layers=[2, 3, 4, 5, 6, 7, 8, 9],
+                 fuse_layer_encoder=[[0, 1, 2, 3], [4, 5, 6, 7]]):
         super().__init__()
         self.backbone = backbone
         self.target_layers = target_layers
+        self.fuse_layer_encoder = fuse_layer_encoder
 
         self.adapters = nn.ModuleList([
-            nn.Linear(student_dims, teacher_dims, bias=False)
-            for _ in target_layers
+            nn.Conv2d(student_dims, teacher_dims, kernel_size=1, bias=False)
+            for _ in range(len(fuse_layer_encoder))
         ])
 
     def forward(self, x):
@@ -57,11 +61,19 @@ class StudentFKD(nn.Module):
             if i == self.target_layers[-1]:
                 break
 
-        # en = [e[:, self.backbone.num_register_tokens + 1:, :] for e in en]
+        side = int(math.sqrt(en[0].shape[1] - 1 - self.backbone.num_register_tokens))
+
+        en = [self.fuse_feature([en[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
+        en = [e[:, self.backbone.num_register_tokens + 1:, :] for e in en]
+        en = [e.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for e in en]
 
         projected = []
         for e, l in zip(en, self.adapters):
             projected.append(l(e))
-        return projected
+
+        return projected, en
+
+    def fuse_feature(self, feat_list):
+        return torch.stack(feat_list, dim=1).mean(dim=1)
 
 

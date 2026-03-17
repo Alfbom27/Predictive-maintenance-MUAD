@@ -78,7 +78,7 @@ for p in encoder.parameters():
 bottleneck = []
 decoder = []
 
-bottleneck.append(bMlp(EMBED_DIM, EMBED_DIM * 4, EMBED_DIM, drop=0.2))
+bottleneck.append(bMlp(EMBED_DIM, EMBED_DIM * 4, EMBED_DIM, drop=0.2, bias=True))
 bottleneck = nn.ModuleList(bottleneck)
 
 for i in range(8):
@@ -110,8 +110,15 @@ for m in trainable_modules.modules():
         nn.init.constant_(m.weight, 1.0)
 
 
-optimizer = StableAdamW([{'params': trainable_modules.parameters()}],
-                        lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=True, eps=1e-10)
+optimizer = StableAdamW([
+    {'params': decoder.parameters(),
+     'lr': 1e-3, 'weight_decay': 2e-3},
+    {'params': model.decoder_adapters.parameters(),
+     'lr': 1e-3, 'weight_decay': 2e-3},
+    {'params': bottleneck.parameters(),
+     'lr': 1e-3, 'weight_decay': 2e-3}
+])
+# optimizer = StableAdamW([{'params': trainable_modules.parameters()}], lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=True, eps=1e-10)
 # lr_scheduler = CosineLRScheduler(optimizer, t_initial=NUM_ITERATIONS - 100, lr_min=2e-4, warmup_t=100, warmup_lr_init=0)
 lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=2e-4, total_iters=NUM_ITERATIONS,
                                    warmup_iters=100)
@@ -143,14 +150,36 @@ while it < NUM_ITERATIONS:
 
         encoded, decoded = model(images)
 
-        p_final = 0.9
-        p = min(p_final * it / 1000, p_final)
-        loss = global_cosine_hm_percent(encoded, decoded, p=p)
+        # p_final = 0.9
+        # p = min(p_final * it / 1000, p_final)
+        # loss = global_cosine_hm_percent(encoded, decoded, p=p)
+
+        loss = 0
+        for e, d in zip(encoded, decoded):
+            e_norm = F.normalize(e, dim=1)
+            d_norm = F.normalize(d, dim=1)
+            loss += (1 - (e_norm * d_norm).sum(dim=1)).mean()
+
+        loss /= len(encoded)
 
         optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(trainable_modules.parameters(), max_norm=0.1)
-        optimizer.step()
+        # nn.utils.clip_grad_norm_(trainable_modules.parameters(), max_norm=1.0)
+        # optimizer.step()
+
+        grad_ok = True
+        for param in trainable_modules.parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    grad_ok = False
+                    break
+
+        if grad_ok:
+            nn.utils.clip_grad_norm_(trainable_modules.parameters(), max_norm=1.0)
+            optimizer.step()
+        else:
+            print(f"Skipping bad batch at iter {it}, loss: {loss.item():.4f}")
+            optimizer.zero_grad()
 
         lr_scheduler.step()
 
@@ -159,6 +188,13 @@ while it < NUM_ITERATIONS:
         if (it + 1) % 250 == 0:
             print(
                 f"iter [{it+1}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.6f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
+            train_loss = []
+            torch.save({
+                "iteration": it,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": lr_scheduler.state_dict(),
+            }, "checkpoint.pth")
 
         # Evaluation...
         if (it + 1) % 10000 == 0:
@@ -252,7 +288,7 @@ while it < NUM_ITERATIONS:
 
         it += 1
 
-    print(f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
+    print(f"iter [{it}/{NUM_ITERATIONS}], lr: {optimizer.param_groups[0]['lr']:.10f}")
     torch.save({
         "iteration": it,
         "model_state_dict": model.state_dict(),

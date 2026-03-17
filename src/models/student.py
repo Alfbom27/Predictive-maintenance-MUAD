@@ -60,8 +60,10 @@ class StudentFKD(nn.Module):
 
             if i == self.target_layers[-1]:
                 break
-        en_raw = en
+
         side = int(math.sqrt(en[0].shape[1] - 1 - self.backbone.num_register_tokens))
+
+        en_raw = en
 
         en = [self.fuse_feature([en[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
         en = [e[:, self.backbone.num_register_tokens + 1:, :] for e in en]

@@ -133,21 +133,24 @@ class ViTillSmall(ViTill):
         self.target_layers = target_layers
         self.fuse_layer_encoder = fuse_layer_encoder
         self.fuse_layer_decoder = fuse_layer_decoder
+        """
         self.decoder_adapters = nn.ModuleList([
-            nn.Conv2d(encoder.student_dims, encoder.teacher_dims, kernel_size=1, bias=False)
-            for _ in range(len(fuse_layer_encoder))
+            nn.Linear(192, 384, bias=False)
+            for _ in target_layers
+        ])"""
+        self.decoder_adapters = nn.ModuleList([
+            nn.Conv2d(192, 384, kernel_size=1, bias=False)
+            for _ in self.fuse_layer_decoder
         ])
 
     def forward(self, x):
         with torch.no_grad():
-            en, en_raw_list = self.encoder(x)
-
-        x = self.fuse_feature(en_raw_list)
-        side = int(math.sqrt(en_raw_list[0].shape[1] - 1 - self.encoder.backbone.num_register_tokens))
+            en_list, en_raw = self.encoder(x)
+        x = self.fuse_feature(en_raw)
+        side = int(math.sqrt(en_raw[0].shape[1] - 1 - self.encoder.backbone.num_register_tokens))
 
         for i, blk in enumerate(self.bottleneck):
             x = blk(x)
-
         de_list = []
         for i, blk in enumerate(self.decoder):
             x = blk(x)
@@ -157,14 +160,14 @@ class ViTillSmall(ViTill):
         # en = [self.fuse_feature([en_list[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
         de = [self.fuse_feature([de_list[idx] for idx in idxs]) for idxs in self.fuse_layer_decoder]
 
-        # en = [e[:, 1 + self.encoder.num_register_tokens:, :] for e in en]
-        de = [d[:, 1 + self.encoder.num_register_tokens:, :] for d in de]
+        # en = [e[:, 1 + self.encoder.backbone.num_register_tokens:, :] for e in en]
+        de = [d[:, 1 + self.encoder.backbone.num_register_tokens:, :] for d in de]
 
         # en = [e.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for e in en]
         de = [d.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for d in de]
 
         de = [l(d) for d, l in zip(de, self.decoder_adapters)]
-        return en, de
+        return en_list, de
 
 
 

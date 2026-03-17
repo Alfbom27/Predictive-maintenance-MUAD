@@ -79,3 +79,37 @@ class StudentFKD(nn.Module):
         return torch.stack(feat_list, dim=1).mean(dim=1)
 
 
+
+class StudentFKDv2(nn.Module):
+    def __init__(self, backbone, teacher_dims, student_dims, target_layers=[2, 3, 4, 5, 6, 7, 8, 9],
+                 fuse_layer_encoder=[[0, 1, 2, 3], [4, 5, 6, 7]]):
+        super().__init__()
+        self.backbone = backbone
+        self.target_layers = target_layers
+        self.fuse_layer_encoder = fuse_layer_encoder
+
+        self.adapters = nn.ModuleList([
+            nn.Linear(student_dims, teacher_dims, bias=False)
+            for _ in target_layers
+        ])
+
+    def forward(self, x):
+        x = self.backbone.prepare_tokens(x)
+        en = []
+        for i, blk in enumerate(self.backbone.blocks):
+            x = blk(x)
+
+            if i in self.target_layers:
+                en.append(x)
+
+            if i == self.target_layers[-1]:
+                break
+
+        projected = []
+        for e, l in zip(en, self.adapters):
+            projected.append(l(e))
+
+        return projected, en
+
+    def fuse_feature(self, feat_list):
+        return torch.stack(feat_list, dim=1).mean(dim=1)

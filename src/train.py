@@ -5,14 +5,14 @@ from torch.utils.data import DataLoader, Subset
 from models.dinov2 import vit_small, vit_tiny
 from models.vision_transformer import Block as VitBlock, bMlp, LinearAttention2
 from functools import partial
-from models.dinomaly import ViTillv2, ViTillSmall, ViTill
+from models.dinomaly import ViTillSmall, ViTill, ViTillSmallv2
 from utils.loss import global_cosine_hm_percent
 from utils.utils import get_gaussian_kernel, trunc_normal_, cal_anomaly_maps, compute_ad_metrics, WarmCosineScheduler
 from utils.optimizer import StableAdamW
 import numpy as np
 from torch.nn import functional as F
 import random
-from models.student import StudentFKD
+from models.student import StudentFKD, StudentFKDv2
 
 # CONFIG FILE WITH PARAMETERS
 
@@ -51,7 +51,7 @@ vit_t = vit_tiny(
     interpolate_offset=0.1,
 )
 
-encoder = StudentFKD(backbone=vit_t, teacher_dims=384, student_dims=192)
+encoder = StudentFKDv2(backbone=vit_t, teacher_dims=384, student_dims=192)
 
 """
 encoder = vit_small(
@@ -92,7 +92,7 @@ decoder = nn.ModuleList(decoder)
 
 # model = ViTillv2(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
 # model = ViTill(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
-model = ViTillSmall(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
+model = ViTillSmallv2(encoder=encoder, decoder=decoder, bottleneck=bottleneck, target_layers=target_layers)
 torch.set_float32_matmul_precision('high')
 model = model.to(DEVICE)
 model = torch.compile(model)

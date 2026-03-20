@@ -4,39 +4,46 @@ from models.dinov2 import vit_base, vit_tiny, vit_small
 from data.dataset import KDdataset, MIADDataset
 from torch.utils.data import DataLoader, random_split
 from torch.optim import AdamW
-from models.student import StudentFKD, Student
-from models.teacher import TeacherFKD, Teacher
+from models.student import StudentFKD, StudentFKDv2
+from models.teacher import TeacherFKD
 from utils.utils import WarmCosineScheduler
 import numpy as np
 import random
 import torch.nn.functional as F
 import time
 
-class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "wind_turbine"]
+# class_list = ["electrical_insulator", "metal_welding", "photovoltaic_module", "wind_turbine"]
+class_list = [
+    "bottle",
+    "cable",
+    "capsule",
+    "carpet",
+    "grid",
+    "hazelnut",
+    "leather",
+    "metal_nut",
+    "pill",
+    "screw",
+    "tile",
+    "toothbrush",
+    "transistor",
+    "wood",
+    "zipper"
+]
 
 train_dataset = MIADDataset(dataset_path="./input/datasets/alfbom27/miad-ad", class_list=class_list, mode="train")
 
-dataset_size = len(train_dataset)
-val_size = int(0.1 * dataset_size)
-train_size = dataset_size - val_size
-
-train_subset, val_subset = random_split(
-    train_dataset,
-    [train_size, val_size],
-)
 
 FROM_CHECKPOINT = True
-CHECKPOINT_PATH = "./input/models/alfbom27/vit-tiny-11k-fm/pytorch/default/1/checkpoint_vit_tiny_11k.pth"
-EPOCHS = 30
-WARMUP_EPOCHS = 2
+CHECKPOINT_PATH = ""
+EPOCHS = 500
+WARMUP_EPOCHS = 1
 BATCH_SIZE = 32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-train_data = DataLoader(dataset=train_subset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4,
+train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=8,
                         pin_memory=True)
 
-val_data = DataLoader(dataset=val_subset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4,
-                      pin_memory=True)
 # train_data = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
 
 teacher_backbone = vit_small(
@@ -73,7 +80,7 @@ student_backbone = vit_tiny(
     interpolate_offset=0.1,
 )
 
-student = StudentFKD(backbone=student_backbone, teacher_dims=384, student_dims=192)
+student = StudentFKDv2(backbone=student_backbone, teacher_dims=384, student_dims=192)
 # student = Student(backbone=student_backbone)
 student = student.to(DEVICE)
 
@@ -81,14 +88,14 @@ lr = 1e-3
 # optimizer = AdamW(student.parameters(), lr=lr, weight_decay=1e-3)
 optimizer = AdamW([
     {"params": student.backbone.parameters(), "lr": lr, "weight_decay": 1e-4},
-    {"params": student.adapters.parameters(), "lr": lr, "weight_decay": 1e-3}
+    {"params": student.adapters.parameters(), "lr": lr, "weight_decay": 1e-4}
 ])
 # optimizer = AdamW(
 #     list(student.parameters()) + list(teacher.adapters.parameters()),
 #     lr=lr,
 #     weight_decay=1e-3
 # )
-lr_scheduler = WarmCosineScheduler(optimizer, base_value=lr, final_value=1e-6, total_iters=EPOCHS * len(train_data),
+lr_scheduler = WarmCosineScheduler(optimizer, base_value=lr, final_value=1e-4, total_iters=EPOCHS * len(train_data),
                                    warmup_iters=WARMUP_EPOCHS * len(train_data))
 
 if FROM_CHECKPOINT:
@@ -119,27 +126,16 @@ while it < (EPOCHS * len(train_data)):
             with torch.no_grad():
                 teacher_out = teacher(images)
             # Student forward pass
-            student_projected, student_raw = student(images)
+            student_out, _ = student(images)
 
-            feat_loss = 0
-            attn_loss = 0
-            for sp, sf, tf in zip(student_projected, student_raw, teacher_out):
-                # feat loss: projected student vs teacher (both 384-dim)
-                sp_norm = F.normalize(sp, dim=1)
-                tf_norm = F.normalize(tf, dim=1)
-                feat_loss += (1 - (sp_norm * tf_norm).sum(dim=1)).mean()
+            loss = 0
+            for sf, tf in zip(student_out, teacher_out):
+                sf = F.normalize(sf, dim=1)
+                tf = F.normalize(tf, dim=1)
+                # loss += F.mse_loss(sf,tf)
+                loss += (1 - (sf * tf).sum(dim=1)).mean()
 
-                # attn loss: raw student (192) vs teacher (384)
-                attn_s = (sf ** 2).sum(dim=1).flatten(1)  # (B, H*W)
-                attn_t = (tf ** 2).sum(dim=1).flatten(1)  # (B, H*W)
-
-                attn_s = attn_s / (attn_s.norm(dim=-1, keepdim=True) + 1e-8)
-                attn_t = attn_t / (attn_t.norm(dim=-1, keepdim=True) + 1e-8)
-                attn_loss += (1 - F.cosine_similarity(attn_s, attn_t, dim=-1)).mean()
-
-            feat_loss /= len(student_projected)
-            attn_loss /= len(student_raw)
-            loss = feat_loss + 0.5 * attn_loss
+            loss /= len(student_out)
 
         optimizer.zero_grad()
         # loss.backward()
@@ -157,21 +153,14 @@ while it < (EPOCHS * len(train_data)):
 
         with torch.no_grad():
             cos = 0
-            for i, (sf, tf) in enumerate(zip(student_raw, teacher_out)):
-                attn_s = (sf ** 2).sum(dim=1).flatten(1)
-                attn_t = (tf ** 2).sum(dim=1).flatten(1)
+            for sf, tf in zip(student_out, teacher_out):
+                sf_norm = F.normalize(sf, dim=1)
+                tf_norm = F.normalize(tf, dim=1)
+                cos += (sf_norm * tf_norm).sum(dim=1).mean()
 
-                s_norm = attn_s.norm(dim=-1)
-                t_norm = attn_t.norm(dim=-1)
+            cos /= len(student_out)
 
-                attn_s = attn_s / (s_norm.unsqueeze(-1) + 1e-8)
-                attn_t = attn_t / (t_norm.unsqueeze(-1) + 1e-8)
-
-                cos_layer = F.cosine_similarity(attn_s, attn_t, dim=-1).mean()
-
-        cos += cos_layer
-
-        cos /= len(student_raw)
+        cos_embedding.append(cos.item())
 
         if it % 100 == 0:
             print(
@@ -184,6 +173,6 @@ while it < (EPOCHS * len(train_data)):
         "model_state_dict": student.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": lr_scheduler.state_dict(),
-    }, "./working/checkpoint.pth")
+    }, "checkpoint_vit_tiny.pth")
 
 

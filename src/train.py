@@ -110,15 +110,7 @@ for m in trainable_modules.modules():
         nn.init.constant_(m.weight, 1.0)
 
 
-optimizer = StableAdamW([
-    {'params': decoder.parameters(),
-     'lr': 1e-3, 'weight_decay': 2e-3},
-    {'params': model.decoder_adapters.parameters(),
-     'lr': 1e-3, 'weight_decay': 2e-3},
-    {'params': bottleneck.parameters(),
-     'lr': 1e-3, 'weight_decay': 2e-3}
-])
-# optimizer = StableAdamW([{'params': trainable_modules.parameters()}], lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=True, eps=1e-10)
+optimizer = StableAdamW([{'params': trainable_modules.parameters()}], lr=2e-3, betas=(0.9, 0.999), weight_decay=1e-4, amsgrad=True, eps=1e-10)
 # lr_scheduler = CosineLRScheduler(optimizer, t_initial=NUM_ITERATIONS - 100, lr_min=2e-4, warmup_t=100, warmup_lr_init=0)
 lr_scheduler = WarmCosineScheduler(optimizer, base_value=2e-3, final_value=2e-4, total_iters=NUM_ITERATIONS,
                                    warmup_iters=100)

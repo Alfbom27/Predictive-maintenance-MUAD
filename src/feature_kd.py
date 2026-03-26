@@ -36,8 +36,8 @@ train_dataset = MIADDataset(dataset_path="./input/datasets/alfbom27/miad-ad", cl
 
 FROM_CHECKPOINT = True
 CHECKPOINT_PATH = ""
-EPOCHS = 500
-WARMUP_EPOCHS = 1
+NUM_ITERATIONS = 40000
+WARMUP_ITERATIONS = 0.05*NUM_ITERATIONS
 BATCH_SIZE = 32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -90,13 +90,9 @@ optimizer = AdamW([
     {"params": student.backbone.parameters(), "lr": lr, "weight_decay": 1e-4},
     {"params": student.adapters.parameters(), "lr": lr, "weight_decay": 1e-4}
 ])
-# optimizer = AdamW(
-#     list(student.parameters()) + list(teacher.adapters.parameters()),
-#     lr=lr,
-#     weight_decay=1e-3
-# )
-lr_scheduler = WarmCosineScheduler(optimizer, base_value=lr, final_value=1e-4, total_iters=EPOCHS * len(train_data),
-                                   warmup_iters=WARMUP_EPOCHS * len(train_data))
+
+lr_scheduler = WarmCosineScheduler(optimizer, base_value=lr, final_value=1e-4, total_iters=NUM_ITERATIONS,
+                                   warmup_iters=WARMUP_ITERATIONS)
 
 if FROM_CHECKPOINT:
     print("Continuing from checkpoint...")
@@ -111,7 +107,7 @@ else:
     it = 0
 
 scaler = torch.amp.GradScaler("cuda")
-while it < (EPOCHS * len(train_data)):
+while it < NUM_ITERATIONS:
     print("Starting training...")
     train_loss = []
     cos_embedding = []

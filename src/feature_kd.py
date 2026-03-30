@@ -126,10 +126,10 @@ while it < NUM_ITERATIONS:
 
             loss = 0
             for sf, tf in zip(student_out, teacher_out):
-                sf = F.normalize(sf, dim=1)
-                tf = F.normalize(tf, dim=1)
+                # sf = F.normalize(sf, dim=1)
+                # tf = F.normalize(tf, dim=1)
                 # loss += F.mse_loss(sf,tf)
-                loss += (1 - (sf * tf).sum(dim=1)).mean()
+                loss += (1- F.cosine_similarity(sf,tf,dim=1)).mean()
 
             loss /= len(student_out)
 
@@ -160,10 +160,10 @@ while it < NUM_ITERATIONS:
 
         if it % 100 == 0:
             print(
-                f"iter [{it}/{EPOCHS * len(train_data)}], loss:{np.mean(train_loss):.8f}, lr: {optimizer.param_groups[0]['lr']:.10f}, avg cos: {np.mean(cos_embedding)}")
+                f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.8f}, lr: {optimizer.param_groups[0]['lr']:.10f}, avg cos: {np.mean(cos_embedding)}")
 
     print(
-        f"iter [{it}/{EPOCHS * len(train_data)}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
+        f"iter [{it}/{NUM_ITERATIONS}], loss:{np.mean(train_loss):.4f}, lr: {optimizer.param_groups[0]['lr']:.10f}")
     torch.save({
         "iteration": it,
         "model_state_dict": student.state_dict(),

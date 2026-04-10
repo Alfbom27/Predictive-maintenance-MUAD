@@ -155,8 +155,8 @@ class ViTillSmallv2(ViTill):
         en = [self.fuse_feature([en_list[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
         de = [self.fuse_feature([de_list[idx] for idx in idxs]) for idxs in self.fuse_layer_decoder]
 
-        en = [e[:, 1 + self.encoder.backbone.num_register_tokens:, :] for e in en]
-        de = [d[:, 1 + self.encoder.backbone.num_register_tokens:, :] for d in de]
+        en = [e[:, 1:, :] for e in en]
+        de = [d[:, 1:, :] for d in de]
 
         en = [e.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for e in en]
         de = [d.permute(0, 2, 1).reshape([x.shape[0], -1, side, side]).contiguous() for d in de]
@@ -183,9 +183,6 @@ class ViTillBSD(nn.Module):
         self.fuse_layer_encoder = fuse_layer_encoder
         self.fuse_layer_decoder = fuse_layer_decoder
         self.patch_size = encoder.patch_size
-
-        if not hasattr(self.encoder, 'num_register_tokens'):
-            self.encoder.num_register_tokens = 0
 
     def forward(self, x):
         B, C, img_h, img_w = x.shape
@@ -215,8 +212,8 @@ class ViTillBSD(nn.Module):
         en = [self.fuse_feature([en_list[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
         de = [self.fuse_feature([de_list[idx] for idx in idxs]) for idxs in self.fuse_layer_decoder]
 
-        en = [e[:, 1 + self.encoder.num_register_tokens:, :] for e in en]
-        de = [d[:, 1 + self.encoder.num_register_tokens:, :] for d in de]
+        en = [e[:, 1:, :] for e in en]
+        de = [d[:, 1:, :] for d in de]
 
         en = [e.permute(0, 2, 1).reshape([B, -1, h, w]).contiguous() for e in en]
         de = [d.permute(0, 2, 1).reshape([B, -1, h, w]).contiguous() for d in de]
@@ -224,4 +221,55 @@ class ViTillBSD(nn.Module):
 
     def fuse_feature(self, feat_list):
         return torch.stack(feat_list, dim=1).mean(dim=1)
+
+
+class ViTillSmallv2BSD(ViTill):
+    def __init__(
+            self,
+            encoder,
+            bottleneck,
+            decoder,
+            target_layers=[2, 3, 4, 5, 6, 7, 8, 9],
+            fuse_layer_encoder=[[0, 1, 2, 3], [4, 5, 6, 7]],
+            fuse_layer_decoder=[[0, 1, 2, 3], [4, 5, 6, 7]],
+    ) -> None:
+        super().__init__(encoder, bottleneck, decoder, target_layers)
+        self.encoder = encoder
+        self.bottleneck = bottleneck
+        self.decoder = decoder
+        self.target_layers = target_layers
+        self.fuse_layer_encoder = fuse_layer_encoder
+        self.fuse_layer_decoder = fuse_layer_decoder
+
+        self.decoder_adapters = nn.ModuleList([
+            nn.Conv2d(192, 384, kernel_size=1, bias=False)
+            for _ in self.fuse_layer_decoder
+        ])
+
+    def forward(self, x):
+        B, C, img_h, img_w = x.shape
+        h, w = img_h // self.patch_size, img_w // self.patch_size
+        with torch.no_grad():
+            en_list, en_raw = self.encoder(x)
+        x = self.fuse_feature(en_raw)
+
+        for i, blk in enumerate(self.bottleneck):
+            x = blk(x)
+        de_list = []
+        for i, blk in enumerate(self.decoder):
+            x = blk(x)
+            de_list.append(x)
+        de_list = de_list[::-1]
+
+        en = [self.fuse_feature([en_list[idx] for idx in idxs]) for idxs in self.fuse_layer_encoder]
+        de = [self.fuse_feature([de_list[idx] for idx in idxs]) for idxs in self.fuse_layer_decoder]
+
+        en = [e[:, 1:, :] for e in en]
+        de = [d[:, 1:, :] for d in de]
+
+        en = [e.permute(0, 2, 1).reshape([B, -1, h, w]).contiguous() for e in en]
+        de = [d.permute(0, 2, 1).reshape([B, -1, h, w]).contiguous() for d in de]
+
+        de = [l(d) for d, l in zip(de, self.decoder_adapters)]
+        return en, de
 

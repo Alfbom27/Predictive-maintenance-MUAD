@@ -6,9 +6,8 @@ import timm
 class DeiT(nn.Module):
     def __init__(self, img_size=224):
         super().__init__()
-        backbone =timm.create_model("deit_tiny_patch16_224", pretrained=True, num_classes=0, img_size=img_size)
+        backbone = timm.create_model("deit_tiny_patch16_224", pretrained=True, num_classes=0, img_size=img_size)
 
-        self.backbone = backbone
         self.patch_embed = backbone.patch_embed
         self.cls_token = backbone.cls_token
         self.pos_embed = backbone.pos_embed
